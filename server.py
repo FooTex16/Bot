@@ -4,13 +4,16 @@ import json
 import time
 import threading
 import requests
+import eventlet  # Import eventlet di awal
+eventlet.monkey_patch()  # Jalankan monkey_patch sebelum import lainnya
+
 from flask import Flask, request, jsonify
 from flask_socketio import SocketIO, emit
 import sqlite3
 from datetime import datetime
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')  # Tambahkan async_mode
 
 # Konfigurasi
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -259,5 +262,6 @@ if __name__ == '__main__':
     status_thread.daemon = True
     status_thread.start()
     
-    # Jalankan server
-    socketio.run(app, host='0.0.0.0', port=10000)  # Render menggunakan port 10000
+    # Jalankan server dengan eventlet
+    port = int(os.environ.get('PORT', 10000))
+    socketio.run(app, host='0.0.0.0', port=port)
