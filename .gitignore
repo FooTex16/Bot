@@ -1,6 +1,5 @@
-<IfModule mod_rewrite.c>
-  RewriteEngine On
-  RewriteCond %{REQUEST_URI}  ^/socket.io/            [NC]
-  RewriteCond %{QUERY_STRING} transport=websocket    [NC]
-  RewriteRule /(.*)           ws://localhost:5000/$1 [P,L]
-</IfModule>
+__pycache__/
+*.pyc
+venv/
+.env
+*.db
