@@ -2,52 +2,42 @@ import os
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from openai import OpenAI
 
-# Load token dari .env
+# Load token dari file .env
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+
+client = OpenAI(api_key=OPENAI_KEY)
 
 # Command /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! 👋 Saya bot Telegram AI. Silakan tanya apa saja!")
+    await update.message.reply_text("Halo! 👋 Saya bot AI otomatis. Silakan tanya apa saja!")
 
-# Fungsi sederhana untuk menjawab pertanyaan seperti otak AI
-def jawab_pertanyaan(teks):
-    teks = teks.lower()
-    if "siapa kamu" in teks:
-        return "Saya adalah bot AI yang dibuat dengan Python."
-    elif "berapa 2+2" in teks or "berapa dua tambah dua" in teks:
-        return "2 + 2 = 4"
-    elif "apa itu ai" in teks or "apa itu artificial intelligence" in teks:
-        return "AI (Artificial Intelligence) adalah kecerdasan buatan yang dibuat oleh manusia untuk menyelesaikan tugas tertentu."
-    elif "siapa presiden indonesia" in teks:
-        return "Presiden Indonesia saat ini adalah Joko Widodo (per 2024)."
-    elif "halo" in teks:
-        return "Halo juga! Ada yang bisa saya bantu?"
-    else:
-        return None
+# Fungsi untuk tanya ke OpenAI
+def tanya_ai(teks: str) -> str:
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": teks}]
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"⚠️ Terjadi error: {e}"
 
-# Balas semua pesan teks, print ke terminal, dan jawab jika pertanyaan sesuai
+# Balas semua pesan user dengan jawaban AI
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pesan = update.message.text
     print(f"Pesan dari {update.effective_user.first_name}: {pesan}")
-    jawaban = jawab_pertanyaan(pesan)
-    if jawaban:
-        await update.message.reply_text(jawaban)
-    else:
-        await update.message.reply_text(f"Kamu mengirim: {pesan}")
+    jawaban = tanya_ai(pesan)
+    await update.message.reply_text(jawaban)
 
 def main():
-    import pytz
-    import asyncio
-
-    os.environ['TZ'] = 'UTC'
-
     app = Application.builder().token(TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
-
+    print("🤖 Bot berjalan... Tekan CTRL+C untuk berhenti.")
     app.run_polling()
 
 if __name__ == "__main__":
