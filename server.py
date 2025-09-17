@@ -6,7 +6,7 @@ import threading
 import requests
 from flask import Flask, request, jsonify
 from flask_socketio import SocketIO, emit
-import sqlite3
+import sqlite3  # Modul bawaan Python, tidak perlu diinstall
 from datetime import datetime
 
 app = Flask(__name__)
