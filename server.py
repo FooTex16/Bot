@@ -6,7 +6,7 @@ import threading
 import requests
 from flask import Flask, request, jsonify
 from flask_socketio import SocketIO, emit
-import sqlite3  # Modul bawaan Python, tidak perlu diinstall
+import sqlite3
 from datetime import datetime
 
 app = Flask(__name__)
@@ -260,4 +260,4 @@ if __name__ == '__main__':
     status_thread.start()
     
     # Jalankan server
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    socketio.run(app, host='0.0.0.0', port=10000)  # Render menggunakan port 10000
