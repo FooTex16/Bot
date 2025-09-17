@@ -1,4 +1,7 @@
-python-telegram-bot
+flask
+flask-socketio
+requests
+pyautogui
+pillow
 python-dotenv
-openai
-groq
+sqlite3
