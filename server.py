@@ -32,6 +32,10 @@ def init_db():
     conn.commit()
     conn.close()
 
+# Pastikan database diinisialisasi saat aplikasi dimulai
+with app.app_context():
+    init_db()
+
 # Fungsi untuk mengirim pesan ke Telegram
 def send_to_telegram(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -252,8 +256,6 @@ def check_client_status():
         conn.close()
 
 if __name__ == '__main__':
-    init_db()
-    
     # Start status checker thread
     status_thread = threading.Thread(target=check_client_status)
     status_thread.daemon = True
