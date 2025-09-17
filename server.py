@@ -16,6 +16,30 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 DATABASE_URL = "clients.db"
 
+# Fungsi untuk memastikan database dan tabel ada
+def ensure_db_exists():
+    try:
+        conn = sqlite3.connect(DATABASE_URL)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS clients (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id TEXT UNIQUE,
+                name TEXT,
+                last_seen TEXT,
+                status TEXT
+            )
+        ''')
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error ensuring database exists: {e}")
+
+# Pastikan database ada sebelum menerima request
+@app.before_request
+def before_request():
+    ensure_db_exists()
+
 # Inisialisasi database
 def init_db():
     conn = sqlite3.connect(DATABASE_URL)
@@ -264,3 +288,4 @@ if __name__ == '__main__':
     # Jalankan server
     port = int(os.environ.get('PORT', 10000))
     socketio.run(app, host='0.0.0.0', port=port)
+
