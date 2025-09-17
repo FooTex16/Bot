@@ -2,66 +2,63 @@ import os
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from openai import OpenAI
 from groq import Groq
 
-# Load environment variables
+# Load environment variable
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 GROQ_KEY = os.getenv("GROQ_API_KEY")
 
-openai_client = OpenAI(api_key=OPENAI_KEY) if OPENAI_KEY else None
-groq_client = Groq(api_key=GROQ_KEY) if GROQ_KEY else None
+client = Groq(api_key=GROQ_KEY)
 
-# Fungsi tanya AI dengan fallback
-def tanya_ai(teks: str) -> str:
-    # 1. Coba pakai OpenAI
-    if openai_client:
-        try:
-            response = openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": teks}]
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            err = str(e)
-            if "insufficient_quota" in err or "429" in err:
-                print("⚠️ Kuota OpenAI habis, fallback ke Groq...")
-            else:
-                return f"⚠️ Error OpenAI: {e}"
+# Fungsi tanya Groq pakai streaming (mirip contohmu)
+def tanya_groq(teks: str) -> str:
+    try:
+        completion = client.chat.completions.create(
+            model="openai/gpt-oss-20b",   # bisa ganti model lain, misalnya llama-3.1-70b-versatile
+            messages=[
+                {"role": "system", "content": "Kamu adalah AI asisten bernama RUDI."},
+                {"role": "user", "content": teks},
+            ],
+            temperature=1,
+            max_completion_tokens=1024,
+            top_p=1,
+            reasoning_effort="medium",
+            stream=True,
+            stop=None,
+            tools=[{"type": "browser_search"}]
+        )
 
-    # 2. Fallback ke Groq
-    if groq_client:
-        try:
-            response = groq_client.chat.completions.create(
-                model="llama-3.1-70b-versatile",
-                messages=[{"role": "user", "content": teks}]
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            return f"⚠️ Error Groq: {e}"
-
-    # 3. Jika dua-duanya gagal
-    return "⚠️ Tidak ada AI service yang tersedia. Pastikan API key benar."
+        jawaban = ""
+        for chunk in completion:
+            delta = chunk.choices[0].delta.content or ""
+            jawaban += delta
+        return jawaban.strip() if jawaban else "⚠️ Tidak ada jawaban."
+    except Exception as e:
+        return f"⚠️ Error Groq: {e}"
 
 # Command /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! 👋 Saya bot AI otomatis.\nKirim pertanyaanmu, saya akan jawab pakai AI (OpenAI/Groq).")
+    await update.message.reply_text("Halo! 👋 Saya bot AI (Groq). Ketik pertanyaanmu!")
 
-# Balas semua pesan user
+# Balas pesan user
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pesan = update.message.text
     print(f"Pesan dari {update.effective_user.first_name}: {pesan}")
-    jawaban = tanya_ai(pesan)
+    jawaban = tanya_groq(pesan)
     await update.message.reply_text(jawaban)
 
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
-    print("🤖 Bot berjalan... Tekan CTRL+C untuk berhenti.")
-    app.run_polling()
+    try:
+        app = Application.builder().token(BOT_TOKEN).build()
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+        print("🤖 Bot Groq berjalan... Tekan CTRL+C untuk berhenti.")
+        app.run_polling()
+    except Exception as e:
+        print("⚠️ Terjadi error pada bot Telegram:")
+        print(e)
+        print("Pastikan hanya satu instance bot yang berjalan. Jika error 'Conflict: terminated by other getUpdates request', matikan proses bot lain yang sedang berjalan.")
 
 if __name__ == "__main__":
     main()
